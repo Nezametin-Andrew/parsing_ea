@@ -95,7 +95,7 @@ class EaComAuth(BaseEaCom):
         if self.status_try_auth is None:
             self.status_try_auth = 403
 
-    async def check_auth_acc(self):
+    async def check_session_acc(self):
 
         """
         Проверка сессии для аккаунта EA
