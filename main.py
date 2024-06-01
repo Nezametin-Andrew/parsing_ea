@@ -13,30 +13,55 @@ class Parsing:
     def __init__(self, account: dict):
         self.account = account
         self.platform = 'pc' if account['platform'] == '1' else 'console'
-        self.start_point, self.amount_data = 50, 50
+        self.page, self.amount_data, self.getting_data, self.try_get_data = 1, 50, 0, 0
         self.processed_ids, self.players, self.sent_data = set(), {}, []
-        self.min_time, self.max_time = 3520, 3900
+        self.min_time, self.max_time = 3420, 3900
         self.get_players()
         self.error = None
+        self.flag = None
 
     async def main_loop(self):
         while True:
             ea = EaComApi(**self.account)
             print(
                 f'Попытка получить данные с EA, количество запрашеваеммых данных: {self.amount_data},'
-                f' страница: {self.start_point}'
+                f' страница: {self.page}'
             )
-            data, status_code = await ea.get_data(amount_data=self.amount_data, start_point=self.start_point)
-
+            data, status_code = await ea.get_data(amount_data=self.amount_data, start_point=self.page * self.amount_data)
+            print(f'Статус ответа от ЕА: {status_code}')
             if status_code == 200:
                 await self.parsing_json(data)
                 time.sleep(random.randint(7, 9))
-            self.start_point += self.amount_data
+            if self.getting_data:
+
+                self.page += 1
+                self.getting_data = 0
+
+                if self.try_get_data:
+                    self.try_get_data = 0
+
+                if self.page == 10:
+                    self.page = 1
+                    self.try_get_data = 0
+                    self.flag = None
+
+            elif self.try_get_data < 2 and not self.getting_data:
+                self.try_get_data += 1
+            elif self.try_get_data == 2 and self.flag is None:
+                self.try_get_data = 0
+                self.page -= 5
+                self.flag = True
+            elif self.page == 10:
+                self.try_get_data = 0
+                self.page = 1
+                self.flag = None
 
     async def parsing_json(self, data):
         if isinstance(data, str):
             data = json.loads(data)
         if 'auctionInfo' in data:
+            print(f'Количество полученных данных от EA: {len(data["auctionInfo"])}')
+            self.getting_data = len(data['auctionInfo'])
             for item in data['auctionInfo']:
                 asset_id, resource_id, expires, rare_flag = (
                     item['itemData']['assetId'], item['itemData']['resourceId'], item['expires'],
