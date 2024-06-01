@@ -240,3 +240,23 @@ class EaComAuth(BaseEaCom):
             self.error = e
             print(e)
             return False
+
+
+class EaComApi(BaseEaCom):
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.price = random.randint(260, 310) * 1000
+        self.transfer_headers['X-Ut-Sid'] = self.sesid
+
+    async def get_data(self, amount_data, start_point):
+        try:
+            req = Request()
+            data = await req.fetch(
+                self.transfer_link.format(amount_data=amount_data, start_point=start_point, price=self.price),
+                headers=self.transfer_headers
+            )
+            return data, req.status_code
+        except Exception as e:
+            print(e)
+            self.error = e
