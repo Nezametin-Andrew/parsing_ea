@@ -22,6 +22,10 @@ class Parsing:
     async def main_loop(self):
         while True:
             ea = EaComApi(**self.account)
+            print(
+                f'Попытка получить данные с EA, количество запрашеваеммых данных: {self.amount_data},'
+                f' страница: {self.start_point}'
+            )
             data, status_code = await ea.get_data(amount_data=self.amount_data, start_point=self.start_point)
 
             if status_code == 200:
