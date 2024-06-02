@@ -2,18 +2,24 @@ import json
 import random
 import sys
 import time
+
 from scrap.request import Request
 import asyncio
 from scrap.EA import EaComAuth, EaComApi
-from scrap.config import proxy_pc, auth_proxy_pc, main_host, tg_url, admins, server_pc
+from scrap.config import main_host, tg_url, admins, server, logger, setting_parser, platform
 
 
 class Parsing:
 
+    CODE_SLEEP = [429, 512, 521, 426,]
+    CODE_AUTH = [401]
+
     def __init__(self, account: dict):
         self.account = account
         self.platform = 'pc' if account['platform'] == '1' else 'console'
-        self.page, self.amount_data, self.getting_data, self.try_get_data = 1, 50, 0, 0
+        self.platform_id = account['platform']
+        self.page, self.amount_data = 1, 30
+        self.getting_data, self.try_get_data, self.border_reload = 0, 0, 15
         self.processed_ids, self.players, self.sent_data = set(), {}, []
         self.min_time, self.max_time = 3420, 3900
         self.get_players()
@@ -21,46 +27,60 @@ class Parsing:
         self.flag = None
 
     async def main_loop(self):
+        await self.set_settings_parse()
         while True:
+
             ea = EaComApi(**self.account)
-            print(
+            logger.info(
                 f'Попытка получить данные с EA, количество запрашеваеммых данных: {self.amount_data},'
                 f' страница: {self.page}'
             )
             data, status_code = await ea.get_data(amount_data=self.amount_data, start_point=self.page * self.amount_data)
-            print(f'Статус ответа от ЕА: {status_code}')
+            logger.info(f'Статус ответа от ЕА: {status_code}')
             if status_code == 200:
                 await self.parsing_json(data)
                 time.sleep(random.randint(7, 9))
-            if self.getting_data:
 
-                self.page += 1
-                self.getting_data = 0
+            if status_code in self.CODE_SLEEP:
 
-                if self.try_get_data:
-                    self.try_get_data = 0
+                if self.error in [True]:
+                    return {'status': 'error', 'error': 'Authentication Required for account'}
 
-                if self.page == 10:
-                    self.page = 1
-                    self.try_get_data = 0
-                    self.flag = None
+                time.sleep(120)
+                await self.set_settings_parse()
+                self.error = True
+                continue
 
-            elif self.try_get_data < 2 and not self.getting_data:
-                self.try_get_data += 1
-            elif self.try_get_data == 2 and self.flag is None:
-                self.try_get_data = 0
-                self.page -= 5
+            if status_code in self.CODE_AUTH:
+                return {'status': 'error', 'error': 'Authentication Required for account'}
+
+            await self.control_parsing()
+
+    async def control_parsing(self):
+
+        if self.getting_data and self.page != self.border_reload and self.try_get_data != 3:
+            self.page += 1
+            self.getting_data = 0
+            self.try_get_data = 0
+        elif self.page == self.border_reload or self.try_get_data == 3 and self.flag is not None:
+            self.page = 1
+            self.getting_data = 0
+            await self.set_settings_parse()
+            if self.try_get_data == 3:
                 self.flag = True
-            elif self.page == 10:
-                self.try_get_data = 0
+        else:
+            if self.page > 5:
+                self.page -= 5
+            else:
                 self.page = 1
-                self.flag = None
+            self.flag = None
 
     async def parsing_json(self, data):
         if isinstance(data, str):
             data = json.loads(data)
+
         if 'auctionInfo' in data:
-            print(f'Количество полученных данных от EA: {len(data["auctionInfo"])}')
+            logger.info(f'Количество полученных данных от EA: {len(data["auctionInfo"])}')
             self.getting_data = len(data['auctionInfo'])
             for item in data['auctionInfo']:
                 asset_id, resource_id, expires, rare_flag = (
@@ -68,6 +88,8 @@ class Parsing:
                     item['itemData'].get('rareflag', '')
                 )
                 if resource_id not in self.processed_ids and self.min_time < int(expires) < self.max_time:
+                    if asset_id not in self.players:
+                        continue
                     self.sent_data.append(
                         {
                             'player_id': asset_id,
@@ -88,12 +110,21 @@ class Parsing:
     async def check_actual_price(self):
         try:
             req = Request()
-            tasks = [req.post_data(server_pc, data=data) for data in self.sent_data]
+            tasks = [req.post_data(server, data=data) for data in self.sent_data]
             responses = await asyncio.gather(*tasks)
-            [print(response) for response in responses]
+            [logger.info(response) for response in responses]
         except Exception as e:
-            print(e)
+            logger.error(e)
             self.error = e
+
+    async def set_settings_parse(self):
+        try:
+            req = Request()
+            data = await req.fetch(setting_parser, params={'platform': self.platform_id})
+            settings = [d for d in data if data['platform'] == self.platform_id][0]
+            self.border_reload, self.amount_data = settings['border_reload'], settings['amount_data']
+        except Exception as e:
+            logger.error(f"Error getting data for parse, error: {e}")
 
     def split_list(self, input_list) -> list:
         if not isinstance(input_list, list):
@@ -117,39 +148,26 @@ class Parsing:
                     self.players[player['id']] = str(player['f']) + " " + str(player['l'])
 
         except FileNotFoundError:
-            print("Error: 'ea.json' file not found.")
+            logger.error("Error: 'ea.json' file not found.")
             self.error = "FileNotFoundError"
         except json.JSONDecodeError:
-            print("Error: Failed to decode JSON from 'ea.json'.")
+            logger.error("Error: Failed to decode JSON from 'ea.json'.")
             self.error = "JSONDecodeError"
         except Exception as e:
-            print(f"Error loading EA data. Details: {str(e)}")
+            logger.error(f"Error loading EA data. Details: {str(e)}")
             self.error = e
 
 
 class MainProcess:
 
-    SETTINGS = {
-        'pc': {
-            'host_recv': '',
-            'proxy': proxy_pc,
-            'proxy_auth': auth_proxy_pc
-        },
-        'console': {
-            'host_recv': '',
-            'proxy': None,
-            'proxy_auth': None
-        }
-    }
-
     def __init__(self, platform='console'):
         self.platform = platform
         self.key_platform = '2' if platform == 'console' else '1'
-        self.settings = self.SETTINGS[platform]
         self.host = main_host
         self.working_accounts = []
         self.update_accounts = []
         self.accounts = []
+        self.reload = False
 
     async def get_accounts(self):
         self.accounts = await Request().fetch(url=self.host, params={'platform': self.key_platform, 'blocked': False})
@@ -163,7 +181,7 @@ class MainProcess:
                     data={'chat_id': ids, 'text': f'Error check accounts {email}\nError: {err}'}
                 )
         except Exception as e:
-            print(f'Sent notification error, error: {e}')
+            logger.error(f'Sent notification error, error: {e}')
 
     async def update_data_acc(self):
         for acc in self.update_accounts:
@@ -197,24 +215,29 @@ class MainProcess:
             break
 
     async def start(self):
-        print('Старт программы')
-        print('Получаю аккунты...')
+        logger.info('Старт программы')
+        logger.info('Получаю аккунты...')
         await self.get_accounts()
         if self.accounts:
-            print('Проверка аккаунтов...')
+            logger.info('Проверка аккаунтов...')
             await self.get_working_account()
         else:
-            print('Не удалось получить рабочий аккаунт.')
+            logger.info('Не удалось получить рабочий аккаунт.')
 
         if self.update_accounts:
-            print('Обновление данных аккаунтов...')
+            logger.info('Обновление данных аккаунтов...')
             await self.update_data_acc()
 
         if self.working_accounts:
-            print('Запускаю парсинг...')
+            logger.info('Запускаю парсинг...')
             start = Parsing(self.working_accounts[0])
-            await start.main_loop()
-        print('Завершение программы через 90 сек.')
+            response = await start.main_loop()
+            if 'error' in response and not self.reload:
+                await self.start()
+                self.reload = True
+            else:
+                await self.notification_admin(err=response['error'], email=self.accounts[0]['email'])
+        logger.info('Завершение программы через 90 сек.')
         time.sleep(90)
         sys.exit(1)
 
@@ -225,6 +248,6 @@ async def main(platform):
 
 
 if __name__ == '__main__':
-    asyncio.run(main('pc'))
+    asyncio.run(main(platform))
 
 

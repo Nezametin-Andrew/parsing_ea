@@ -1,9 +1,12 @@
 import json
 import random
 from scrap.request import Request
+from scrap.config import logger, proxy, auth_proxy
 
 
 class BaseEaCom:
+
+    PROXY = proxy.format(auth=auth_proxy)
 
     def __init__(self, **kwargs):
         self.email = kwargs['email']
@@ -32,13 +35,13 @@ class BaseEaCom:
                 setattr(self, key, data[key])
 
         except FileNotFoundError:
-            print("Error: 'ea.json' file not found.")
+            logger.error("Error: 'ea.json' file not found.")
             self.error = "FileNotFoundError"
         except json.JSONDecodeError:
-            print("Error: Failed to decode JSON from 'ea.json'.")
+            logger.error("Error: Failed to decode JSON from 'ea.json'.")
             self.error = "JSONDecodeError"
         except Exception as e:
-            print(f"Error loading EA data. Details: {str(e)}")
+            logger.error(f"Error loading EA data. Details: {str(e)}")
             self.error = e
 
 
@@ -105,7 +108,8 @@ class EaComAuth(BaseEaCom):
         req = Request()
         data = await req.fetch(
             url=self.transfer_link.format(**self.DEFAULT_DATA_FOR_TRANSFER),
-            headers=self.transfer_headers
+            headers=self.transfer_headers,
+            proxy=self.PROXY
         )
         if req.status_code == 401:
             return {'error': 'session is blocked', 'status': False}
@@ -123,7 +127,10 @@ class EaComAuth(BaseEaCom):
             link, params = self.data_auth['first_link'], self.data_auth['first_params']
             params['access_token'] = self.access_token
             req = Request()
-            data = await req.fetch(url=link, params=params)
+            data = await req.fetch(
+                url=link, params=params,
+                proxy=self.PROXY
+            )
 
             if isinstance(data, str):
                 data = json.loads(data)
@@ -136,7 +143,7 @@ class EaComAuth(BaseEaCom):
                 if 'error_description' in data:
                     self.error = data['error_description']
         except Exception as e:
-            print(f"Error get auth code, errors: {str(e)}")
+            logger.error(f"Error get auth code, errors: {str(e)}")
             self.error = e
 
     async def _get_code_for_auth(self):
@@ -149,14 +156,17 @@ class EaComAuth(BaseEaCom):
             req = Request()
             link, params = self.data_auth['four_link'], self.data_auth['four_params']
             params['access_token'] = self.access_token
-            data = await req.fetch(link, params=params)
+            data = await req.fetch(
+                link, params=params,
+                proxy=self.PROXY
+            )
             if isinstance(data, str):
                 data = json.loads(data)
             if "code" in data:
                 self.code_for_auth = data['code']
         except Exception as e:
             self.error = e
-            print(f"Error get code for auth: {str(e)}")
+            logger.error(f"Error get code for auth: {str(e)}")
 
     async def _get_personal_id(self):
 
@@ -169,13 +179,16 @@ class EaComAuth(BaseEaCom):
             req = Request()
             link, headers = self.data_auth['second_link'], self.data_auth['second_headers']
             headers['Authorization'] = headers['Authorization'].format(access_token=self.access_token)
-            data = await req.fetch(link, headers=headers)
+            data = await req.fetch(
+                link, headers=headers,
+                proxy=self.PROXY
+            )
             if req.status_code == 200:
                 if 'pid' in data:
                     if 'pidId' in data['pid']:
                         self.personal_id = data['pid']['pidId']
         except Exception as e:
-            print(f"Error get personal id, error: {str(e)}")
+            logger.error(f"Error get personal id, error: {str(e)}")
             self.error = e
 
     async def _get_person(self):
@@ -198,7 +211,10 @@ class EaComAuth(BaseEaCom):
                 personal_id=self.personal_id
             )
             headers['Nucleus-Access-Code'] = headers['Nucleus-Access-Code'].format(auth_code=self.auth_code)
-            data = await req.fetch(url=link, headers=headers, params=params)
+            data = await req.fetch(
+                url=link, headers=headers, params=params,
+                proxy=self.PROXY
+            )
             if req.status_code == 200:
                 if 'userAccountInfo' in data:
                     if 'personas' in data['userAccountInfo']:
@@ -210,7 +226,7 @@ class EaComAuth(BaseEaCom):
                         else:
                             self.persona_id = data['userAccountInfo']['personas'][0]['personaId']
         except Exception as e:
-            print(f"Error get person, error: {str(e)}")
+            logger.error(f"Error get person, error: {str(e)}")
             self.error = e
 
     async def _get_session_id(self):
@@ -227,7 +243,10 @@ class EaComAuth(BaseEaCom):
             )
             params['gameSku'], params['nucleusPersonaId'] = self.header_pl, self.persona_id
             params['identification']['authCode'] = self.code_for_auth
-            data = await req.post_data(link, headers=headers, data=params)
+            data = await req.post_data(
+                link, headers=headers, data=params,
+                proxy=self.PROXY
+            )
 
             if isinstance(data, str):
                 data = json.loads(data)
@@ -238,7 +257,7 @@ class EaComAuth(BaseEaCom):
             return False
         except Exception as e:
             self.error = e
-            print(e)
+            logger.error(e)
             return False
 
 
@@ -254,9 +273,9 @@ class EaComApi(BaseEaCom):
             req = Request()
             data = await req.fetch(
                 self.transfer_link.format(amount_data=amount_data, start_point=start_point, price=self.price),
-                headers=self.transfer_headers
+                headers=self.transfer_headers, proxy=self.PROXY
             )
             return data, req.status_code
         except Exception as e:
-            print(e)
+            logger.error(e)
             self.error = e
