@@ -121,7 +121,7 @@ class Parsing:
         try:
             req = Request()
             data = await req.fetch(setting_parser, params={'platform': self.platform_id})
-            settings = [d for d in data if data['platform'] == self.platform_id][0]
+            settings = [d for d in data if d['platform'] == self.platform_id]
             self.border_reload, self.amount_data = settings['border_reload'], settings['amount_data']
         except Exception as e:
             logger.error(f"Error getting data for parse, error: {e}")

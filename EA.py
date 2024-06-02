@@ -65,7 +65,7 @@ class EaComAuth(BaseEaCom):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.header_pl = 'FFA24PCC' if self.platform == 'pc' else 'FFA24PS5'
+        self.header_pl = 'FFA24PCC' if self.platform == 'pc' else 'FFA24XBO' #'FFA24PS5'
         self.updated_sesid = None
         self.transfer_headers, self.auth_code, self.personal_id, self.persona = None, None, None, None
         self.persona_id, self.code_for_auth, self.status_try_auth = None, None, None
@@ -134,7 +134,6 @@ class EaComAuth(BaseEaCom):
 
             if isinstance(data, str):
                 data = json.loads(data)
-
             if req.status_code == 200:
                 if 'code' in data:
                     self.auth_code = data['code']
@@ -247,7 +246,6 @@ class EaComAuth(BaseEaCom):
                 link, headers=headers, data=params,
                 proxy=self.PROXY
             )
-
             if isinstance(data, str):
                 data = json.loads(data)
 

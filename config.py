@@ -7,7 +7,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 
-platform = 'pc'
+platform = 'console'
 load_dotenv()
 
 main_host = os.getenv('MAIN_HOST')
